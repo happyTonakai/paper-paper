@@ -1,0 +1,10 @@
+paperpaper
+*.exe
+*.test
+*.out
+.env
+.idea/
+.vscode/
+*.swp
+*.swo
+.paperpaper/
