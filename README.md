@@ -5,13 +5,13 @@
 ## 安装
 
 ```bash
-go install github.com/paperpaper/paperpaper@latest
+go install github.com/happyTonakai/paper-paper@latest
 ```
 
 或从源码构建：
 
 ```bash
-git clone https://github.com/paperpaper/paperpaper.git
+git clone https://github.com/happyTonakai/paper-paper.git
 cd paperpaper
 go build -o paperpaper .
 ```
