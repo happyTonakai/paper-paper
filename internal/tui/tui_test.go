@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/paperpaper/paperpaper/internal/api"
 	"github.com/paperpaper/paperpaper/internal/config"
@@ -1051,5 +1052,64 @@ func TestViewportRendersScrollbarForScrollableContent(t *testing.T) {
 	view := m.View().Content
 	if !strings.Contains(view, "█") {
 		t.Error("scrollable viewport should render a scrollbar thumb")
+	}
+}
+
+func TestPreprocessMarkdownMath(t *testing.T) {
+	input := "# Title\n\ninline $x_i^2$ and \\(y_j\\).\n\n$$\\alpha + \\beta$$\n\n\\[a=b\\]"
+	got := preprocessMarkdown(input)
+	if strings.Contains(got, "$$") || strings.Contains(got, `\[`) || strings.Contains(got, `\]`) || strings.Contains(got, `\(`) || strings.Contains(got, `\)`) {
+		t.Fatalf("math delimiters should be normalized, got: %q", got)
+	}
+	if !strings.Contains(got, "```math") || !strings.Contains(got, "`x_i^2`") || !strings.Contains(got, "`y_j`") {
+		t.Fatalf("math should be converted to terminal-friendly code spans/blocks, got: %q", got)
+	}
+}
+
+func TestRenderMarkdownHidesHeadingMarkersAndStrongMarkers(t *testing.T) {
+	cfg := testConfig()
+	m := NewModel(cfg)
+	sendWindowSize(m, 100, 24)
+
+	rendered := ansi.Strip(m.renderMarkdown("# Title\n\n## Section\n\nThis is **bold**.\n\n$$x_i^2$$"))
+	if strings.Contains(rendered, "## Section") {
+		t.Fatalf("h2 marker should not be visible in rendered markdown: %q", rendered)
+	}
+	if strings.Contains(rendered, "**bold**") {
+		t.Fatalf("strong markers should not be visible in rendered markdown: %q", rendered)
+	}
+	if strings.Contains(rendered, "$$") {
+		t.Fatalf("math block delimiters should not be visible in rendered markdown: %q", rendered)
+	}
+}
+
+func TestMouseSelectionCopiesVisibleText(t *testing.T) {
+	cfg := testConfig()
+	m := NewModel(cfg)
+	sendWindowSize(m, 100, 24)
+
+	p := session.NewPaper("paper content", "")
+	p.InitialSummary = "plain selectable text\nsecond line"
+	m.LoadPaper(p)
+	m.phase = PhaseChat
+	m.refreshViewportContent(true)
+
+	lines := m.visiblePlainViewportLines()
+	y := 1
+	for i, line := range lines {
+		if strings.Contains(line, "plain selectable") {
+			y = i + 1 // terminal y includes the one-line header
+			break
+		}
+	}
+	m.handleMouseClick(tea.MouseClickMsg{X: 2, Y: y, Button: tea.MouseLeft})
+	m.handleMouseMotion(tea.MouseMotionMsg{X: 10, Y: y, Button: tea.MouseLeft})
+	m.handleMouseRelease(tea.MouseReleaseMsg{X: 10, Y: y, Button: tea.MouseLeft})
+
+	if m.copyStatus == "" {
+		t.Fatal("mouse release after selection should set copy status")
+	}
+	if selected := m.selectedViewportText(); selected == "" {
+		t.Fatal("selected text should not be empty")
 	}
 }

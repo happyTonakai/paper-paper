@@ -60,6 +60,7 @@ func (m *Model) renderViewportWithScrollbar() string {
 	if len(lines) > height {
 		lines = lines[:height]
 	}
+	lines = m.applySelectionToViewportLines(lines)
 
 	total := m.viewport.TotalLineCount()
 	if total <= height || height <= 0 {
@@ -165,6 +166,9 @@ func (m *Model) renderStatusBar() string {
 
 	left := fmt.Sprintf("Tokens: %s", formatNumber(tokens))
 	right := fmt.Sprintf("Rounds: %d", rounds)
+	if m.copyStatus != "" {
+		left = m.copyStatus
+	}
 
 	if m.err != nil {
 		left = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render(fmt.Sprintf("Error: %s", m.err))

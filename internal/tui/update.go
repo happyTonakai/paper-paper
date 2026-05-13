@@ -29,7 +29,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewportContent(false)
 
 	case tea.KeyPressMsg:
+		m.clearSelection()
 		return m.handleKeyMsg(msg)
+
+	case tea.MouseClickMsg:
+		return m.handleMouseClick(msg)
+
+	case tea.MouseMotionMsg:
+		return m.handleMouseMotion(msg)
+
+	case tea.MouseReleaseMsg:
+		return m.handleMouseRelease(msg)
+
+	case tea.MouseWheelMsg:
+		m.clearSelection()
 
 	case streamMsg:
 		return m.handleStreamMsg(msg)

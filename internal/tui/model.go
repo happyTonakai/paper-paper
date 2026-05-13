@@ -1,9 +1,13 @@
 package tui
 
 import (
+	"regexp"
+	"strings"
+
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
+	"charm.land/glamour/v2/styles"
 	"charm.land/lipgloss/v2"
 
 	"github.com/paperpaper/paperpaper/internal/api"
@@ -32,6 +36,18 @@ const (
 
 type streamMsg struct {
 	chunk api.StreamChunk
+}
+
+type selectionPoint struct {
+	x int
+	y int
+}
+
+type viewportSelection struct {
+	selecting bool
+	active    bool
+	start     selectionPoint
+	end       selectionPoint
 }
 
 type summarizeDoneMsg struct {
@@ -72,6 +88,9 @@ type Model struct {
 
 	// Delete confirmation
 	confirmDelete bool
+
+	selection  viewportSelection
+	copyStatus string
 
 	err error
 
@@ -184,9 +203,16 @@ func (m *Model) renderMarkdown(text string) string {
 
 	// Recreate renderer if width changed
 	if m.glamourRenderer == nil || m.glamourWidth != targetWidth {
+		style := styles.DarkStyleConfig
+		style.H2.Prefix = ""
+		style.H3.Prefix = ""
+		style.H4.Prefix = ""
+		style.H5.Prefix = ""
+		style.H6.Prefix = ""
+
 		renderer, err := glamour.NewTermRenderer(
 			glamour.WithWordWrap(targetWidth),
-			glamour.WithStylePath("dark"),
+			glamour.WithStyles(style),
 		)
 		if err != nil {
 			// Fallback to simple rendering
@@ -196,9 +222,37 @@ func (m *Model) renderMarkdown(text string) string {
 		m.glamourWidth = targetWidth
 	}
 
-	rendered, err := m.glamourRenderer.Render(text)
+	rendered, err := m.glamourRenderer.Render(preprocessMarkdown(text))
 	if err != nil {
 		return text
 	}
 	return rendered
+}
+
+var (
+	blockDollarMathPattern  = regexp.MustCompile(`(?s)\$\$(.*?)\$\$`)
+	blockBracketMathPattern = regexp.MustCompile(`(?s)\\\[(.*?)\\\]`)
+	inlineParenMathPattern  = regexp.MustCompile(`\\\((.*?)\\\)`)
+	inlineDollarMathPattern = regexp.MustCompile(`\$([^$\n]+?)\$`)
+)
+
+func preprocessMarkdown(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = blockDollarMathPattern.ReplaceAllStringFunc(text, func(match string) string {
+		inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(match, "$$"), "$$"))
+		if inner == "" {
+			return match
+		}
+		return "\n\n```math\n" + inner + "\n```\n\n"
+	})
+	text = blockBracketMathPattern.ReplaceAllStringFunc(text, func(match string) string {
+		inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(match, `\[`), `\]`))
+		if inner == "" {
+			return match
+		}
+		return "\n\n```math\n" + inner + "\n```\n\n"
+	})
+	text = inlineParenMathPattern.ReplaceAllString(text, "`$1`")
+	text = inlineDollarMathPattern.ReplaceAllString(text, "`$1`")
+	return text
 }
