@@ -42,10 +42,10 @@ type ChatResponse struct {
 }
 
 type StreamChunk struct {
-	Content   string
-	Done      bool
+	Content    string
+	Done       bool
 	TokenCount int
-	Err       error
+	Err        error
 }
 
 type Client struct {
