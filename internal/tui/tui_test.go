@@ -1349,3 +1349,21 @@ func TestExportShowsStatusWithoutReplacingConversation(t *testing.T) {
 		t.Fatalf("/export should keep input mode, got %d", m.mode)
 	}
 }
+
+func TestWindowTitleUsesAppAndPaperTitle(t *testing.T) {
+	cfg := testConfig()
+	m := NewModel(cfg)
+	sendWindowSize(m, 120, 40)
+
+	if got := m.View().WindowTitle; got != "PaperPaper" {
+		t.Fatalf("expected default window title PaperPaper, got %q", got)
+	}
+
+	p := session.NewPaper("paper content", "")
+	p.Title = "A Great Paper"
+	m.LoadPaper(p)
+
+	if got := m.View().WindowTitle; got != "PaperPaper — A Great Paper" {
+		t.Fatalf("expected paper window title, got %q", got)
+	}
+}

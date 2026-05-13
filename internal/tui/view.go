@@ -40,10 +40,30 @@ func (m *Model) View() tea.View {
 	b.WriteString(m.renderStatusBar())
 
 	return tea.View{
-		Content:   b.String(),
-		AltScreen: true,
-		MouseMode: tea.MouseModeCellMotion,
+		Content:     b.String(),
+		AltScreen:   true,
+		MouseMode:   tea.MouseModeCellMotion,
+		WindowTitle: m.renderWindowTitle(),
 	}
+}
+
+func (m *Model) renderWindowTitle() string {
+	title := "PaperPaper"
+	if p := m.manager.Paper(); p != nil {
+		paperTitle := strings.TrimSpace(p.Title)
+		if paperTitle == "" && p.SourceURL != "" {
+			paperTitle = p.SourceURL
+		}
+		if paperTitle != "" {
+			title = "PaperPaper — " + paperTitle
+		}
+	}
+	title = strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(title)
+	if len([]rune(title)) > 80 {
+		r := []rune(title)
+		title = string(r[:77]) + "..."
+	}
+	return title
 }
 
 func (m *Model) renderViewportWithScrollbar() string {
