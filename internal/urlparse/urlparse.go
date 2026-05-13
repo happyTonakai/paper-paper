@@ -7,9 +7,94 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
+
+var (
+	arxivNewIDPattern = regexp.MustCompile(`^\d{4}\.\d{4,5}(v\d+)?$`)
+	arxivOldIDPattern = regexp.MustCompile(`^[A-Za-z-]+(\.[A-Za-z]{2})?/\d{7}(v\d+)?$`)
+)
+
+// NormalizeArxivInput recognizes an arXiv ID or arXiv URL and returns a
+// canonical arXiv abs URL plus the extracted ID.
+func NormalizeArxivInput(input string) (canonicalURL, id string, ok bool) {
+	s := strings.TrimSpace(input)
+	if s == "" {
+		return "", "", false
+	}
+
+	if len(s) >= len("arxiv:") && strings.EqualFold(s[:len("arxiv:")], "arxiv:") {
+		s = strings.TrimSpace(s[len("arxiv:"):])
+	}
+
+	if IsURL(s) {
+		id, ok := extractArxivIDFromURL(s)
+		if !ok {
+			return "", "", false
+		}
+		return "https://arxiv.org/abs/" + id, id, true
+	}
+
+	s = strings.TrimSuffix(s, ".pdf")
+	if isArxivID(s) {
+		return "https://arxiv.org/abs/" + s, s, true
+	}
+
+	return "", "", false
+}
+
+// IsArxivInput reports whether input is an arXiv ID or arXiv URL.
+func IsArxivInput(input string) bool {
+	_, _, ok := NormalizeArxivInput(input)
+	return ok
+}
+
+func isArxivID(s string) bool {
+	return arxivNewIDPattern.MatchString(s) || arxivOldIDPattern.MatchString(s)
+}
+
+func extractArxivIDFromURL(raw string) (string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	lower := strings.ToLower(trimmed)
+	if !strings.HasPrefix(lower, "http://arxiv.org/") &&
+		!strings.HasPrefix(lower, "https://arxiv.org/") &&
+		!strings.HasPrefix(lower, "http://www.arxiv.org/") &&
+		!strings.HasPrefix(lower, "https://www.arxiv.org/") &&
+		!strings.HasPrefix(lower, "http://export.arxiv.org/") &&
+		!strings.HasPrefix(lower, "https://export.arxiv.org/") {
+		return "", false
+	}
+
+	// Avoid pulling in net/url just for this simple path extraction; arXiv IDs
+	// cannot contain '?' or '#'.
+	path := trimmed
+	if idx := strings.Index(path, "://"); idx >= 0 {
+		path = path[idx+3:]
+		if slash := strings.Index(path, "/"); slash >= 0 {
+			path = path[slash+1:]
+		} else {
+			return "", false
+		}
+	}
+	if q := strings.IndexAny(path, "?#"); q >= 0 {
+		path = path[:q]
+	}
+	path = strings.Trim(path, "/")
+
+	for _, prefix := range []string{"abs/", "pdf/", "html/", "e-print/"} {
+		if strings.HasPrefix(path, prefix) {
+			id := strings.TrimPrefix(path, prefix)
+			id = strings.TrimSuffix(id, ".pdf")
+			if isArxivID(id) {
+				return id, true
+			}
+		}
+	}
+
+	return "", false
+}
 
 // FetchURL fetches content from a URL, trying arxiv2text first, then falling back to HTTP.
 func FetchURL(url string) (string, error) {

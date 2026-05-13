@@ -97,3 +97,27 @@ func TestHTTPFetchInvalidURL(t *testing.T) {
 		t.Error("expected error for invalid URL")
 	}
 }
+
+func TestNormalizeArxivInput(t *testing.T) {
+	tests := []struct {
+		input string
+		url   string
+		id    string
+		ok    bool
+	}{
+		{"2301.00001", "https://arxiv.org/abs/2301.00001", "2301.00001", true},
+		{"arXiv:2301.00001v2", "https://arxiv.org/abs/2301.00001v2", "2301.00001v2", true},
+		{"https://arxiv.org/abs/2404.12345", "https://arxiv.org/abs/2404.12345", "2404.12345", true},
+		{"https://arxiv.org/pdf/2404.12345.pdf", "https://arxiv.org/abs/2404.12345", "2404.12345", true},
+		{"cs/9901001", "https://arxiv.org/abs/cs/9901001", "cs/9901001", true},
+		{"https://example.com/abs/2404.12345", "", "", false},
+		{"not an id", "", "", false},
+	}
+
+	for _, tt := range tests {
+		url, id, ok := NormalizeArxivInput(tt.input)
+		if ok != tt.ok || url != tt.url || id != tt.id {
+			t.Errorf("NormalizeArxivInput(%q) = (%q, %q, %v), want (%q, %q, %v)", tt.input, url, id, ok, tt.url, tt.id, tt.ok)
+		}
+	}
+}

@@ -2,15 +2,17 @@ package tui
 
 import (
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textarea"
-	"charm.land/bubbles/v2/viewport"
-	tea "charm.land/bubbletea/v2"
+	"charm.land/bubbletea/v2"
+	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/paperpaper/paperpaper/internal/api"
 	"github.com/paperpaper/paperpaper/internal/config"
 	"github.com/paperpaper/paperpaper/internal/prompt"
 	"github.com/paperpaper/paperpaper/internal/session"
+
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
 )
 
 type Mode int
@@ -53,11 +55,11 @@ type Model struct {
 	viewport viewport.Model
 	textarea textarea.Model
 
-	mode    Mode
-	phase   Phase
-	ready   bool
-	width   int
-	height  int
+	mode   Mode
+	phase  Phase
+	ready  bool
+	width  int
+	height int
 
 	streaming     bool
 	streamContent string
@@ -72,12 +74,16 @@ type Model struct {
 	confirmDelete bool
 
 	err error
+
+	// Markdown renderer cache
+	glamourRenderer *glamour.TermRenderer
+	glamourWidth    int
 }
 
 func NewModel(cfg *config.Config) *Model {
 	vp := viewport.New()
 	ta := textarea.New()
-	ta.Placeholder = "输入问题... (Enter 发送, Shift+Enter 换行)"
+	ta.Placeholder = "输入 arXiv 链接/ID，或粘贴论文内容... (Enter 发送)"
 	ta.Focus()
 	ta.ShowLineNumbers = false
 	ta.SetHeight(3)
@@ -164,3 +170,35 @@ var (
 	separatorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240"))
 )
+
+// renderMarkdown renders markdown text with proper word wrap width
+func (m *Model) renderMarkdown(text string) string {
+	// Calculate target width: 2/3 of terminal width
+	targetWidth := m.width * 2 / 3
+	if targetWidth < 40 {
+		targetWidth = 40
+	}
+	if targetWidth > 120 {
+		targetWidth = 120
+	}
+
+	// Recreate renderer if width changed
+	if m.glamourRenderer == nil || m.glamourWidth != targetWidth {
+		renderer, err := glamour.NewTermRenderer(
+			glamour.WithWordWrap(targetWidth),
+			glamour.WithStylePath("dark"),
+		)
+		if err != nil {
+			// Fallback to simple rendering
+			return text
+		}
+		m.glamourRenderer = renderer
+		m.glamourWidth = targetWidth
+	}
+
+	rendered, err := m.glamourRenderer.Render(text)
+	if err != nil {
+		return text
+	}
+	return rendered
+}

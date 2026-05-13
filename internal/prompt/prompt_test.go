@@ -20,16 +20,18 @@ func TestEmbeddedPrompts(t *testing.T) {
 }
 
 func TestGetHeavy(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	result := GetHeavy()
 	if result == "" {
 		t.Error("GetHeavy should not return empty")
 	}
-	if !strings.Contains(result, "总结") {
-		t.Error("HeavyPrompt should contain '总结'")
+	if !strings.Contains(result, "Markdown") {
+		t.Error("HeavyPrompt should contain 'Markdown'")
 	}
 }
 
 func TestGetLight(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	result := GetLight()
 	if result == "" {
 		t.Error("GetLight should not return empty")
@@ -40,6 +42,7 @@ func TestGetLight(t *testing.T) {
 }
 
 func TestGetDigest(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	result := GetDigest()
 	if result == "" {
 		t.Error("GetDigest should not return empty")

@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"charm.land/bubbletea/v2"
-	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/paperpaper/paperpaper/internal/session"
@@ -27,7 +26,7 @@ func (m *Model) View() tea.View {
 	case ModeList:
 		b.WriteString(m.renderList())
 	default:
-		b.WriteString(m.viewport.View())
+		b.WriteString(m.renderViewportWithScrollbar())
 	}
 	b.WriteString("\n")
 
@@ -45,6 +44,57 @@ func (m *Model) View() tea.View {
 		AltScreen: true,
 		MouseMode: tea.MouseModeCellMotion,
 	}
+}
+
+func (m *Model) renderViewportWithScrollbar() string {
+	view := m.viewport.View()
+	lines := strings.Split(view, "\n")
+	height := m.viewport.Height()
+	width := m.viewport.Width()
+
+	// viewport.View() should already render to height, but pad defensively so the
+	// scrollbar always has a stable full-height track.
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+
+	total := m.viewport.TotalLineCount()
+	if total <= height || height <= 0 {
+		for i := range lines {
+			lines[i] = lipgloss.NewStyle().Width(width).Render(lines[i]) + " "
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	thumbSize := height * height / total
+	if thumbSize < 1 {
+		thumbSize = 1
+	}
+	if thumbSize > height {
+		thumbSize = height
+	}
+
+	maxTop := height - thumbSize
+	maxOffset := total - height
+	thumbTop := 0
+	if maxOffset > 0 {
+		thumbTop = m.viewport.YOffset() * maxTop / maxOffset
+	}
+
+	trackStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	thumbStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("247"))
+	for i := range lines {
+		bar := trackStyle.Render("│")
+		if i >= thumbTop && i < thumbTop+thumbSize {
+			bar = thumbStyle.Render("█")
+		}
+		lines[i] = lipgloss.NewStyle().Width(width).Render(lines[i]) + bar
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func (m *Model) renderHeader() string {
@@ -174,19 +224,15 @@ func (m *Model) renderList() string {
 func (m *Model) renderMessages() string {
 	p := m.manager.Paper()
 	if p == nil {
-		return bannerStyle.Render("欢迎使用 PaperPaper!\n\n请粘贴论文内容，然后按 Ctrl+D 或 Alt+Enter 提交。")
+		return bannerStyle.Render("欢迎使用 PaperPaper!\n\n请输入 arXiv 链接或 ID，然后按 Enter 开始抓取并总结。\n\n也可以粘贴论文全文，或使用 /new <arxiv/url/path> 从 arXiv、URL 或文件加载。")
 	}
 
 	var b strings.Builder
 
 	// Initial summary
 	if p.InitialSummary != "" {
-		rendered, err := glamour.Render(p.InitialSummary, "dark")
-		if err == nil {
-			b.WriteString(rendered)
-		} else {
-			b.WriteString(p.InitialSummary)
-		}
+		rendered := m.renderMarkdown(p.InitialSummary)
+		b.WriteString(rendered)
 		b.WriteString("\n")
 		sepWidth := m.width - 4
 		if sepWidth < 1 {
@@ -205,12 +251,8 @@ func (m *Model) renderMessages() string {
 	// Streaming content
 	if m.streaming && m.streamContent != "" {
 		b.WriteString(aiStyle.Render("🤖 AI: "))
-		rendered, err := glamour.Render(m.streamContent, "dark")
-		if err == nil {
-			b.WriteString(rendered)
-		} else {
-			b.WriteString(m.streamContent)
-		}
+		rendered := m.renderMarkdown(m.streamContent)
+		b.WriteString(rendered)
 		b.WriteString(dimStyle.Render(" ▍"))
 		b.WriteString("\n")
 	}
@@ -240,24 +282,17 @@ func (m *Model) renderMessage(msg session.Message) string {
 		header := aiStyle.Render("🤖 AI:")
 		b.WriteString(header)
 		b.WriteString(" ")
-		rendered, err := glamour.Render(msg.Content, "dark")
-		if err == nil {
-			lines := strings.Split(rendered, "\n")
-			for i, line := range lines {
-				if i > 0 {
-					b.WriteString("   ")
-				}
-				b.WriteString(line)
-				if i < len(lines)-1 {
-					b.WriteString("\n")
-				}
+		rendered := m.renderMarkdown(msg.Content)
+		// Add indentation for AI messages
+		lines := strings.Split(rendered, "\n")
+		for i, line := range lines {
+			if i > 0 {
+				b.WriteString("   ")
 			}
-		} else {
-			content := msg.Content
-			if len(content) > 200 {
-				content = content[:200] + "..."
+			b.WriteString(line)
+			if i < len(lines)-1 {
+				b.WriteString("\n")
 			}
-			b.WriteString(content)
 		}
 		b.WriteString("\n")
 		b.WriteString(dimStyle.Render(fmt.Sprintf("   [Tokens: %d]", msg.TokenCount)))

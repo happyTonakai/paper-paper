@@ -55,7 +55,14 @@ func main() {
 		var content string
 		var sourceURL string
 
-		if urlparse.IsURL(input) {
+		if arxivURL, _, ok := urlparse.NormalizeArxivInput(input); ok {
+			sourceURL = arxivURL
+			content, err = urlparse.FetchURL(arxivURL)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error fetching arXiv paper: %v\n", err)
+				os.Exit(1)
+			}
+		} else if urlparse.IsURL(input) {
 			sourceURL = input
 			content, err = urlparse.FetchURL(input)
 			if err != nil {

@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/paperpaper/paperpaper/internal/api"
 	"github.com/paperpaper/paperpaper/internal/config"
 	"github.com/paperpaper/paperpaper/internal/session"
 )
@@ -981,4 +982,74 @@ func TestSessionPersistence(t *testing.T) {
 	}
 
 	t.Log("Session persistence test completed")
+}
+
+func TestStreamingDoesNotForceBottomAfterUserScrolls(t *testing.T) {
+	cfg := testConfig()
+	m := NewModel(cfg)
+	sendWindowSize(m, 100, 24)
+
+	p := session.NewPaper("paper content", "")
+	p.InitialSummary = strings.Repeat("summary line\n", 120)
+	m.LoadPaper(p)
+	m.phase = PhaseChat
+	m.refreshViewportContent(true)
+	m.viewport.ScrollUp(12)
+	before := m.viewport.YOffset()
+	if before == 0 || m.viewport.AtBottom() {
+		t.Fatalf("test setup should be scrolled away from bottom, offset=%d atBottom=%v", before, m.viewport.AtBottom())
+	}
+
+	m.streaming = true
+	m.streamContent = "partial answer\n"
+	m.streamBuf = ""
+	m.Update(streamMsg{chunk: api.StreamChunk{Content: strings.Repeat("new streamed content ", 4)}})
+
+	if got := m.viewport.YOffset(); got != before {
+		t.Errorf("stream update should preserve user scroll offset: before=%d after=%d", before, got)
+	}
+	if m.viewport.AtBottom() {
+		t.Error("stream update should not force viewport back to bottom")
+	}
+}
+
+func TestStreamingAutoFollowsWhenAlreadyAtBottom(t *testing.T) {
+	cfg := testConfig()
+	m := NewModel(cfg)
+	sendWindowSize(m, 100, 24)
+
+	p := session.NewPaper("paper content", "")
+	p.InitialSummary = strings.Repeat("summary line\n", 80)
+	m.LoadPaper(p)
+	m.phase = PhaseChat
+	m.refreshViewportContent(true)
+	if !m.viewport.AtBottom() {
+		t.Fatal("test setup should start at bottom")
+	}
+
+	m.streaming = true
+	m.streamContent = "partial answer\n"
+	m.streamBuf = ""
+	m.Update(streamMsg{chunk: api.StreamChunk{Content: strings.Repeat("new streamed content ", 4)}})
+
+	if !m.viewport.AtBottom() {
+		t.Error("stream update should keep following output when the user was already at bottom")
+	}
+}
+
+func TestViewportRendersScrollbarForScrollableContent(t *testing.T) {
+	cfg := testConfig()
+	m := NewModel(cfg)
+	sendWindowSize(m, 100, 24)
+
+	p := session.NewPaper("paper content", "")
+	p.InitialSummary = strings.Repeat("summary line\n", 120)
+	m.LoadPaper(p)
+	m.phase = PhaseChat
+	m.refreshViewportContent(true)
+
+	view := m.View().Content
+	if !strings.Contains(view, "█") {
+		t.Error("scrollable viewport should render a scrollbar thumb")
+	}
 }

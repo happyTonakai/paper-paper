@@ -5,14 +5,15 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textarea"
-	tea "charm.land/bubbletea/v2"
+	"charm.land/bubbletea/v2"
 
 	"github.com/paperpaper/paperpaper/internal/api"
 	exportPkg "github.com/paperpaper/paperpaper/internal/export"
 	"github.com/paperpaper/paperpaper/internal/prompt"
 	"github.com/paperpaper/paperpaper/internal/session"
 	"github.com/paperpaper/paperpaper/internal/urlparse"
+
+	"charm.land/bubbles/v2/textarea"
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -24,6 +25,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.ready = true
 		m.resizeComponents()
+		// Re-render viewport content with new width while respecting scroll position.
+		m.refreshViewportContent(false)
 
 	case tea.KeyPressMsg:
 		return m.handleKeyMsg(msg)
@@ -34,7 +37,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case summarizeDoneMsg:
 		m.manager.SetInitialSummary(msg.summary)
 		m.phase = PhaseChat
-		m.viewport.SetContent(m.renderMessages())
+		m.refreshViewportContent(false)
 		m.manager.Save()
 		go func() {
 			title, _ := m.apiClient.ExtractTitle(m.cfg.API.LightModel, m.manager.Paper().Content)
@@ -78,7 +81,7 @@ func (m *Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.manager.SetPaper(nil)
 				m.phase = PhaseInit
 				m.streamContent = ""
-				m.viewport.SetContent(bannerStyle.Render("论文已删除。\n\n请粘贴论文内容开始新的会话。"))
+				m.viewport.SetContent(bannerStyle.Render("论文已删除。\n\n请输入 arXiv 链接/ID 开始新的会话。"))
 			}
 			m.confirmDelete = false
 			return m, nil
@@ -216,9 +219,13 @@ func (m *Model) handleSubmit() (tea.Model, tea.Cmd) {
 		return m.handleCommand(input)
 	}
 
-	// Check if paper is loaded
+	// Check if paper is loaded. A bare arXiv ID/link, URL, or file path should
+	// load the paper first; otherwise keep supporting direct paste mode.
 	if m.manager.Paper() == nil {
-		// Treat input as paper content
+		if urlparse.IsArxivInput(input) || urlparse.IsURL(input) || urlparse.IsFilePath(input) {
+			return m.loadFromInput(input)
+		}
+
 		m.loadPaperFromText(input)
 		return m, m.startStream([]api.ChatMessage{
 			{Role: "system", Content: prompt.GetHeavy()},
@@ -250,7 +257,7 @@ func (m *Model) loadPaperFromText(content string) {
 	m.streamContent = ""
 	m.phase = PhaseInit
 
-	m.viewport.SetContent(m.renderMessages())
+	m.refreshViewportContent(true)
 }
 
 func (m *Model) askQuestion(question string) (tea.Model, tea.Cmd) {
@@ -281,9 +288,8 @@ func (m *Model) askQuestion(question string) (tea.Model, tea.Cmd) {
 		messages = append(messages, api.ChatMessage{Role: msg.Role, Content: msg.Content})
 	}
 
-	m.viewport.SetContent(m.renderMessages())
+	m.refreshViewportContent(true)
 	m.textarea.Reset()
-	m.viewport.GotoBottom()
 
 	// Start streaming
 	return m, m.startStream(messages)
@@ -309,8 +315,7 @@ func (m *Model) handleStreamMsg(msg streamMsg) (tea.Model, tea.Cmd) {
 			TokenCount:  session.EstimateTokens(m.streamContent),
 		})
 		m.manager.Save()
-		m.viewport.SetContent(m.renderMessages())
-		m.viewport.GotoBottom()
+		m.refreshViewportContent(false)
 		return m, nil
 	}
 
@@ -350,8 +355,7 @@ func (m *Model) handleStreamMsg(msg streamMsg) (tea.Model, tea.Cmd) {
 				}
 			}()
 		}
-		m.viewport.SetContent(m.renderMessages())
-		m.viewport.GotoBottom()
+		m.refreshViewportContent(false)
 		return m, nil
 	}
 
@@ -362,8 +366,7 @@ func (m *Model) handleStreamMsg(msg streamMsg) (tea.Model, tea.Cmd) {
 	// Update viewport content periodically for smooth rendering
 	if len(m.streamBuf) > 50 {
 		m.streamBuf = ""
-		m.viewport.SetContent(m.renderMessages())
-		m.viewport.GotoBottom()
+		m.refreshViewportContent(false)
 	}
 
 	// Continue streaming from existing channel
@@ -387,7 +390,7 @@ func (m *Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		if len(parts) > 1 {
 			return m.loadFromInput(strings.TrimSpace(parts[1]))
 		}
-		m.viewport.SetContent(bannerStyle.Render("欢迎使用 PaperPaper!\n\n请粘贴论文内容，然后按 Enter 提交。\n\nShift+Enter 换行，或使用 /new <url/path> 从文件或 URL 加载。"))
+		m.viewport.SetContent(bannerStyle.Render("欢迎使用 PaperPaper!\n\n请输入 arXiv 链接或 ID，然后按 Enter 开始抓取并总结。\n\n也可以粘贴论文全文，Shift+Enter 换行；或使用 /new <arxiv/url/path> 从 arXiv、URL 或文件加载。"))
 		return m, nil
 
 	case "/list":
@@ -397,7 +400,7 @@ func (m *Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if len(items) == 0 {
-			m.viewport.SetContent(bannerStyle.Render("没有历史论文。\n\n请粘贴论文内容开始新的会话。"))
+			m.viewport.SetContent(bannerStyle.Render("没有历史论文。\n\n请输入 arXiv 链接/ID 开始新的会话。"))
 			return m, nil
 		}
 		m.listItems = items
@@ -474,7 +477,7 @@ func (m *Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 	case "/help":
 		m.viewport.SetContent(bannerStyle.Render(
 			"可用命令:\n\n" +
-				"  /new [url/path]  新建会话（可从 URL 或文件加载）\n" +
+				"  /new [arxiv/url/path]  新建会话（可从 arXiv、URL 或文件加载）\n" +
 				"  /list            会话列表\n" +
 				"  /open <id>       加载历史会话\n" +
 				"  /delete          删除当前会话\n" +
@@ -555,7 +558,7 @@ func (m *Model) handleSummarize() (tea.Model, tea.Cmd) {
 		{Role: "user", Content: context.String()},
 	}
 
-	m.viewport.SetContent(m.renderMessages())
+	m.refreshViewportContent(true)
 	return m, m.startStream(messages)
 }
 
@@ -595,7 +598,11 @@ func (m *Model) loadFromInput(input string) (tea.Model, tea.Cmd) {
 	var sourceURL string
 	var err error
 
-	if urlparse.IsURL(input) {
+	if arxivURL, _, ok := urlparse.NormalizeArxivInput(input); ok {
+		sourceURL = arxivURL
+		m.viewport.SetContent(bannerStyle.Render("正在抓取 arXiv 论文全文..."))
+		content, err = urlparse.FetchURL(arxivURL)
+	} else if urlparse.IsURL(input) {
 		sourceURL = input
 		m.viewport.SetContent(bannerStyle.Render("正在从 URL 加载..."))
 		content, err = urlparse.FetchURL(input)
@@ -603,7 +610,7 @@ func (m *Model) loadFromInput(input string) (tea.Model, tea.Cmd) {
 		m.viewport.SetContent(bannerStyle.Render("正在从文件加载..."))
 		content, err = urlparse.LoadFile(input)
 	} else {
-		m.viewport.SetContent(bannerStyle.Render("无效的输入，请提供 URL 或文件路径。"))
+		m.viewport.SetContent(bannerStyle.Render("无效的输入，请提供 arXiv 链接/ID、URL 或文件路径。"))
 		return m, nil
 	}
 
@@ -631,12 +638,23 @@ func (m *Model) loadFromInput(input string) (tea.Model, tea.Cmd) {
 	m.phase = PhaseInit
 	m.mode = ModeInput
 
-	m.viewport.SetContent(m.renderMessages())
+	m.refreshViewportContent(true)
 
 	return m, m.startStream([]api.ChatMessage{
 		{Role: "system", Content: prompt.GetHeavy()},
 		{Role: "user", Content: content},
 	})
+}
+
+func (m *Model) refreshViewportContent(forceBottom bool) {
+	wasAtBottom := m.viewport.AtBottom()
+	yOffset := m.viewport.YOffset()
+	m.viewport.SetContent(m.renderMessages())
+	if forceBottom || wasAtBottom {
+		m.viewport.GotoBottom()
+		return
+	}
+	m.viewport.SetYOffset(yOffset)
 }
 
 func (m *Model) resizeComponents() {
